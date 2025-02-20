@@ -1,6 +1,7 @@
 const std = @import("std");
+const mem = std.mem;
 
-const Efs2Diag = enum(u8) {
+pub const Efs2Diag = enum(u16) {
     HELLO = 0,
     QUERY = 1,
     OPEN = 2,
@@ -77,7 +78,7 @@ const DiagSubsys = enum(u8) {
     UMTS = 9,
     HWTC = 10,
     FTM = 11,
-    REX = 12,
+    //REX = 12,
     OS = 12, // DIAG_SUBSYS_OS is equal to DIAG_SUBSYS_REX
     GPS = 13,
     WMS = 14,
@@ -99,7 +100,7 @@ const DiagSubsys = enum(u8) {
     CALLP1X = 30,
     APPS = 31,
     SETTINGS = 32,
-    GSDI = 33,
+    //GSDI = 33,
     UIMDIAG = 33, // DIAG_SUBSYS_UIMDIAG is equal to DIAG_SUBSYS_GSDI
     TMC = 34,
     USB = 35,
@@ -109,7 +110,7 @@ const DiagSubsys = enum(u8) {
     CLKRGM = 39,
     DEVICES = 40,
     WLAN = 41,
-    PS_DATA_LOGGING = 42,
+    //PS_DATA_LOGGING = 42,
     PS = 42, // DIAG_SUBSYS_PS is equal to DIAG_SUBSYS_PS_DATA_LOGGING
     MFLO = 43,
     DTV = 44,
@@ -258,7 +259,7 @@ const DiagField = enum(u8) {
     SW_VERSION_F = 56,
     DLOAD_F = 58,
     TMOB_F = 59,
-    FTM_CMD_F = 59,
+    //FTM_CMD_F = 59,
     EXT_SW_VERSION_F = 60,
     TEST_STATE_F = 61,
     STATE_F = 63,
@@ -337,31 +338,38 @@ const DiagField = enum(u8) {
     COMPRESSED_PKT = 155,
     MSG_SMALL_F = 156,
     QSH_TRACE_PAYLOAD_F = 157,
-    MAX_F = 157,
+    //MAX_F = 157,
 };
 
 pub const Header = packed struct {
-    cmd_code: u1,
-    subsys_id: u1,
-    subsys_cmd_code: u2,
+    cmd_code: u8,
+    subsys_id: u8,
+    subsys_cmd_code: u16,
 };
 
 pub const Efs2DiagHelloReq = packed struct {
+    pub const size = @bitOffsetOf(Efs2DiagHelloReq, "padding") / 8;
+
     header: Header = .{
         .cmd_code = @intFromEnum(DiagField.SUBSYS_CMD_F),
         .subsys_id = @intFromEnum(DiagSubsys.FS),
         .subsys_cmd_code = @intFromEnum(Efs2Diag.HELLO),
     },
-    targ_pkt_window: u32 = 100000, // Window size in packets for sends from phone
-    targ_byte_window: u32 = 100000, // Window size in bytes for sends from phone
-    host_pkt_window: u32 = 100000, // Window size in packets for sends from host
-    host_byte_window: u32 = 100000, // Window size in bytes for sends from host
-    iter_pkt_window: u32 = 100000, // Window size in packets for dir iteration
-    iter_byte_window: u32 = 100000, // Window size in bytes for dir iteration
+    targ_pkt_window: u32 = 0x100000, // Window size in packets for sends from phone
+    targ_byte_window: u32 = 0x100000, // Window size in bytes for sends from phone
+    host_pkt_window: u32 = 0x100000, // Window size in packets for sends from host
+    host_byte_window: u32 = 0x100000, // Window size in bytes for sends from host
+    iter_pkt_window: u32 = 0x100000, // Window size in packets for dir iteration
+    iter_byte_window: u32 = 0x100000, // Window size in bytes for dir iteration
     version: u32 = 1, // Protocol version number
     min_version: u32 = 1, // Smallest supported protocol version number
     max_version: u32 = 1, // Highest supported protocol version number
     feature_bits: u32 = 0xffffffff, // Feature bit mask; one bit per feature
+    padding: u32 = 0,
+
+    pub fn asBytes(self: *Efs2DiagHelloReq) []const u8 {
+        return mem.asBytes(self)[0..size];
+    }
 };
 
 pub const Efs2DiagHelloRsp = Efs2DiagHelloReq;
