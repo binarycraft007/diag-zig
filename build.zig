@@ -4,6 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const t = target.result;
+
+    const libusb = b.dependency("libusb", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib = b.addStaticLibrary(.{
         .name = "hdlc",
         .target = target,
@@ -29,6 +36,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     translate_c.addIncludePath(b.path("src/hdlc"));
+    translate_c.addIncludePath(libusb.path("libusb"));
 
     const exe = b.addExecutable(.{
         .name = "diag",
@@ -37,8 +45,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    exe.linkSystemLibrary("libserialport");
     exe.root_module.addImport("c", translate_c.addModule("c"));
+    exe.linkLibrary(libusb.artifact("usb"));
+    if (t.os.tag == .linux) {
+        exe.linkSystemLibrary("libudev");
+    }
     exe.linkLibrary(lib);
     b.installArtifact(exe);
 

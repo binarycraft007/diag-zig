@@ -10,27 +10,25 @@ pub fn main() !void {
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
-    var port: ?*c.sp_port = null;
-    assert(c.sp_get_port_by_name("/dev/ttyUSB0", &port) == c.SP_OK);
-    assert(c.sp_open(port, c.SP_MODE_READ_WRITE) == c.SP_OK);
-    assert(c.sp_set_baudrate(port, 115200) == c.SP_OK);
-
     var req: diagpkt.Efs2DiagHelloReq = .{};
 
     const result = try hdlc.encode(gpa, req.asBytes());
     defer result.deinit();
 
     const end = mem.indexOfScalar(u8, result.items, '\x7e');
+    _ = end;
 
-    _ = c.sp_blocking_write(port, result.items.ptr, end.?, 3000);
+    _ = c.libusb_init(null);
+    defer c.libusb_exit(null);
 
-    var buf = try std.ArrayList(u8).initCapacity(gpa, diagpkt.Efs2DiagHelloRsp.size * 2);
-    defer buf.deinit();
-    buf.expandToCapacity();
+    const handle = c.libusb_open_device_with_vid_pid(null, 0x2cb7, 0x010b);
+    defer c.libusb_close(handle);
 
-    _ = c.sp_blocking_read(port, buf.items.ptr, buf.items.len, 3000);
+    if (c.libusb_kernel_driver_active(handle, 0) == 1) {
+        _ = c.libusb_detach_kernel_driver(handle, 0);
+    }
 
-    std.debug.print("{x}\n", .{buf.items});
+    _ = c.libusb_claim_interface(handle, 0);
 }
 
 test "simple test" {
