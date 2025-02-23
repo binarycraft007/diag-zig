@@ -1,8 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
-const diagpkt = @import("diagpkt.zig");
-const hdlc = @import("hdlc.zig");
+const diag = @import("diag.zig");
+const efs2 = diag.efs2;
 const usb = @import("usb.zig");
 
 pub fn main() !void {
@@ -10,20 +10,25 @@ pub fn main() !void {
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
-    var req: diagpkt.Efs2DiagHelloReq = .{};
-
-    const result = try hdlc.encode(gpa, req.asBytes());
-    defer result.deinit();
-
-    const end = mem.indexOfScalar(u8, result.items, '\x7e').? + 1;
-
-    try usb.init();
-    defer usb.deinit();
+    var ctx = try usb.Context.init();
+    defer ctx.deinit();
 
     var iface = try usb.Interface.autoFind();
     defer iface.deinit();
 
-    _ = try iface.write(result.items[0..end]);
+    {
+        var req: efs2.Hello.Request = .{};
+        try req.send(gpa, iface.writer());
+        const resp = try efs2.Hello.Response.recv(gpa, iface.reader());
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
+        var req: efs2.Query.Request = .{};
+        try req.send(gpa, iface.writer());
+        const resp = try efs2.Query.Response.recv(gpa, iface.reader());
+        std.debug.print("{any}\n", .{resp});
+    }
 }
 
 test "simple test" {

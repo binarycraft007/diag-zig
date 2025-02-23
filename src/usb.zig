@@ -1,16 +1,33 @@
 const std = @import("std");
+const io = std.io;
+const mem = std.mem;
 const c = @import("c");
 const builtin = @import("builtin");
+const hdlc = @import("hdlc.zig");
 const usb = @This();
 
-pub fn init() !void {
-    if (c.libusb_init(null) < 0)
-        return error.InitFailed;
-}
+const timeout = 50;
 
-pub fn deinit() void {
-    c.libusb_exit(null);
-}
+pub const Context = struct {
+    ctx: ?*c.libusb_context = null,
+
+    pub fn init() !Context {
+        var ctx: Context = .{};
+        if (c.libusb_init(&ctx.ctx) < 0) return error.InitFailed;
+        _ = c.libusb_set_option(
+            ctx.ctx,
+            c.LIBUSB_OPTION_LOG_LEVEL,
+            c.LIBUSB_LOG_LEVEL_NONE,
+        );
+        var tv = c.timeval{ .tv_sec = 0, .tv_usec = timeout };
+        _ = c.libusb_handle_events_timeout(ctx.ctx, &tv);
+        return ctx;
+    }
+
+    pub fn deinit(self: *Context) void {
+        c.libusb_exit(self.ctx);
+    }
+};
 
 pub const DevFinderRule = struct {
     bInterfaceClass: u8,
@@ -20,8 +37,18 @@ pub const DevFinderRule = struct {
 };
 
 const dev_finder_rules = [_]DevFinderRule{
-    .{ .bInterfaceClass = 255, .bInterfaceSubClass = 255, .bInterfaceProtocol = 48, .bNumEndpoints = 2 },
-    .{ .bInterfaceClass = 255, .bInterfaceSubClass = 255, .bInterfaceProtocol = 255, .bNumEndpoints = 2 },
+    .{
+        .bInterfaceClass = 255,
+        .bInterfaceSubClass = 255,
+        .bInterfaceProtocol = 48,
+        .bNumEndpoints = 2,
+    },
+    .{
+        .bInterfaceClass = 255,
+        .bInterfaceSubClass = 255,
+        .bInterfaceProtocol = 255,
+        .bNumEndpoints = 2,
+    },
 };
 
 pub const Interface = struct {
@@ -31,6 +58,7 @@ pub const Interface = struct {
     interface_number: c_int = -1,
     read_endpoint: u8 = 0,
     write_endpoint: u8 = 0,
+    max_packet_size: usize = 0x200,
     received_first_packet: bool = false,
 
     pub fn autoFind() !Interface {
@@ -77,14 +105,15 @@ pub const Interface = struct {
                             var j: usize = 0;
                             while (j < alt.*.bNumEndpoints) : (j += 1) {
                                 const ep = &alt.*.endpoint[j];
+                                iface.max_packet_size = @min(ep.*.wMaxPacketSize, iface.max_packet_size);
                                 if (ep.*.bEndpointAddress & c.LIBUSB_ENDPOINT_DIR_MASK == c.LIBUSB_ENDPOINT_IN) {
                                     iface.read_endpoint = ep.*.bEndpointAddress;
                                 } else if (ep.*.bEndpointAddress & c.LIBUSB_ENDPOINT_DIR_MASK == c.LIBUSB_ENDPOINT_OUT) {
                                     iface.write_endpoint = ep.*.bEndpointAddress;
                                 }
-                                try iface.claim();
-                                return iface;
                             }
+                            try iface.claim();
+                            return iface;
                         }
                     }
                 }
@@ -93,7 +122,13 @@ pub const Interface = struct {
         return error.NotFound;
     }
 
-    pub fn claim(self: *Interface) !void {
+    pub const ClaimError = error{
+        DetachKernelDriverFailed,
+        SetConfigurationFailed,
+        ClaimInterfaceFailed,
+    };
+
+    pub fn claim(self: *Interface) ClaimError!void {
         if (c.libusb_kernel_driver_active(self.handle, self.interface_number) == 1) {
             if (c.libusb_detach_kernel_driver(self.handle, self.interface_number) != 0) {
                 return error.DetachKernelDriverFailed;
@@ -111,19 +146,83 @@ pub const Interface = struct {
         }
     }
 
-    pub fn write(self: *Interface, buf: []const u8) !usize {
+    pub const ReadError = error{
+        InvalidArgument,
+        BrokenPipe,
+        NoDevice,
+        InputOutput,
+        UnexpectedError,
+    };
+
+    pub const WriteError = error{
+        InvalidArgument,
+        BrokenPipe,
+        NoDevice,
+        InputOutput,
+        UnexpectedError,
+    } || mem.Allocator.Error;
+
+    pub const Reader = io.Reader(Interface, ReadError, read);
+    pub const Writer = io.Writer(Interface, WriteError, write);
+
+    pub fn reader(self: Interface) Reader {
+        return .{ .context = self };
+    }
+
+    pub fn writer(self: Interface) Writer {
+        return .{ .context = self };
+    }
+
+    pub fn write(self: Interface, buf: []const u8) !usize {
         var amt: c_int = 0;
-        if (c.libusb_bulk_transfer(
+        const ret = c.libusb_bulk_transfer(
             self.handle,
             self.write_endpoint,
             @constCast(buf.ptr),
             @intCast(buf.len),
             &amt,
-            1000,
-        ) < 0) {
-            return error.BulkTransferFailed;
-        }
-        return @intCast(amt);
+            timeout,
+        );
+        return blk: switch (ret) {
+            c.LIBUSB_SUCCESS,
+            c.LIBUSB_ERROR_TIMEOUT,
+            c.LIBUSB_ERROR_OVERFLOW,
+            => @intCast(amt),
+            c.LIBUSB_ERROR_IO => error.InputOutput,
+            c.LIBUSB_ERROR_PIPE => {
+                _ = c.libusb_clear_halt(self.handle, self.write_endpoint);
+                break :blk error.BrokenPipe;
+            },
+            c.LIBUSB_ERROR_NO_DEVICE => error.NoDevice,
+            c.LIBUSB_ERROR_INVALID_PARAM => error.InvalidArgument,
+            else => return error.UnexpectedError,
+        };
+    }
+
+    pub fn read(self: Interface, buf: []u8) !usize {
+        var amt: c_int = 0;
+        const ret = c.libusb_bulk_transfer(
+            self.handle,
+            self.read_endpoint,
+            @constCast(buf.ptr),
+            @intCast(buf.len),
+            &amt,
+            0x7fffffff,
+        );
+        return blk: switch (ret) {
+            c.LIBUSB_SUCCESS,
+            c.LIBUSB_ERROR_TIMEOUT,
+            c.LIBUSB_ERROR_OVERFLOW,
+            => @intCast(amt),
+            c.LIBUSB_ERROR_IO => error.InputOutput,
+            c.LIBUSB_ERROR_PIPE => {
+                _ = c.libusb_clear_halt(self.handle, self.read_endpoint);
+                break :blk error.BrokenPipe;
+            },
+            c.LIBUSB_ERROR_NO_DEVICE => error.NoDevice,
+            c.LIBUSB_ERROR_INVALID_PARAM => error.InvalidArgument,
+            else => return error.UnexpectedError,
+        };
     }
 
     pub fn deinit(self: *Interface) void {
@@ -135,8 +234,8 @@ pub const Interface = struct {
 };
 
 test {
-    try init();
-    defer deinit();
+    var ctx = try Context.init();
+    defer ctx.deinit();
     var iface = try Interface.autoFind();
     defer iface.deinit();
 }
