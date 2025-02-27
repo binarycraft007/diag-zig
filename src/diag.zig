@@ -5,6 +5,12 @@ const hdlc = @import("hdlc.zig");
 pub const efs2 = @import("diag/efs2.zig");
 
 pub const Subsys = enum(u8) {
+    pub const Header = packed struct {
+        cmd_code: u8,
+        subsys_id: u8,
+        subsys_cmd_code: u16,
+    };
+
     oem = 0,
     zrex = 1,
     sd = 2,
@@ -297,3 +303,52 @@ pub const Control = packed struct {
     cmd_code: u8,
     mode: u16,
 };
+
+pub const SystemOperations = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Request = packed struct {
+        const Self = @This();
+        const edl_reset_cmd_code = 1;
+        pub const size = @sizeOf(Self);
+
+        header: Subsys.Header = .{
+            .cmd_code = @intFromEnum(Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(Subsys.system_operations),
+            .subsys_cmd_code = edl_reset_cmd_code,
+        },
+        padding: u32 = 0x00,
+
+        pub fn asBytes(self: *Self) []const u8 {
+            return mem.asBytes(self)[0..size];
+        }
+    };
+
+    pub const Response = Request;
+};
+
+pub fn sendAndRecv(comptime T: type, gpa: mem.Allocator, writer: anytype, reader: anytype) !T {
+    var context: T = .{};
+    var req = try hdlc.encode(gpa, context.request.asBytes());
+    defer req.deinit();
+
+    try writer.writeAll(req.bytes());
+
+    const header_bytes = mem.asBytes(&context.request.header);
+    while (true) {
+        var buf: [512]u8 = undefined;
+        const amt = try reader.read(&buf);
+        if (!mem.eql(u8, buf[0..header_bytes.len], header_bytes)) {
+            continue;
+        }
+
+        var result = try hdlc.decode(gpa, buf[0..amt]);
+        defer result.deinit();
+
+        const size = @field(@TypeOf(context.response), "size");
+        @memcpy(mem.asBytes(&context.response)[0..size], result.bytes()[0..size]);
+        break;
+    }
+    return context;
+}

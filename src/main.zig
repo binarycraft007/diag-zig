@@ -17,16 +17,17 @@ pub fn main() !void {
     defer iface.deinit();
 
     {
-        var req: efs2.Hello.Request = .{};
-        try req.send(gpa, iface.writer());
-        const resp = try efs2.Hello.Response.recv(gpa, iface.reader());
+        const resp = try diag.sendAndRecv(efs2.Hello, gpa, iface.writer(), iface.reader());
         std.debug.print("{any}\n", .{resp});
     }
 
     {
-        var req: efs2.Query.Request = .{};
-        try req.send(gpa, iface.writer());
-        const resp = try efs2.Query.Response.recv(gpa, iface.reader());
+        const resp = try diag.sendAndRecv(efs2.Query, gpa, iface.writer(), iface.reader());
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
+        const resp = try diag.sendAndRecv(diag.SystemOperations, gpa, iface.writer(), iface.reader());
         std.debug.print("{any}\n", .{resp});
     }
 }

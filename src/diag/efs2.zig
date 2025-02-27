@@ -2,12 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const hdlc = @import("../hdlc.zig");
 const diag = @import("../diag.zig");
-
-pub const Header = packed struct {
-    cmd_code: u8,
-    subsys_id: u8,
-    subsys_cmd_code: u16,
-};
+const Header = diag.Subsys.Header;
 
 pub const Command = enum(u16) {
     hello = 0,
@@ -74,6 +69,9 @@ pub const Command = enum(u16) {
 };
 
 pub const Hello = struct {
+    request: Request = .{},
+    response: Response = .{},
+
     pub const Request = packed struct {
         const Self = @This();
 
@@ -123,6 +121,9 @@ pub const Hello = struct {
 };
 
 pub const Query = struct {
+    request: Request = .{},
+    response: Response = .{},
+
     pub const Request = packed struct {
         const Self = @This();
 
