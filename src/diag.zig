@@ -330,25 +330,29 @@ pub const SystemOperations = struct {
 
 pub fn sendAndRecv(comptime T: type, gpa: mem.Allocator, writer: anytype, reader: anytype) !T {
     var context: T = .{};
-    var req = try hdlc.encode(gpa, context.request.asBytes());
-    defer req.deinit();
+    var encoder: hdlc.Encoder = .{ .gpa = gpa };
+    const req = try encoder.encode(context.request.asBytes());
+    defer gpa.free(req);
 
-    try writer.writeAll(req.bytes());
+    try writer.writeAll(req);
 
+    var decoder = hdlc.Decoder.init(gpa);
+    defer decoder.deinit();
     const header_bytes = mem.asBytes(&context.request.header);
-    while (true) {
+    while (decoder.state != .done) {
         var buf: [512]u8 = undefined;
         const amt = try reader.read(&buf);
-        if (!mem.eql(u8, buf[0..header_bytes.len], header_bytes)) {
+        if (decoder.state == .start and !mem.eql(u8, buf[0..header_bytes.len], header_bytes)) {
             continue;
         }
 
-        var result = try hdlc.decode(gpa, buf[0..amt]);
-        defer result.deinit();
-
-        const size = @field(@TypeOf(context.response), "size");
-        @memcpy(mem.asBytes(&context.response)[0..size], result.bytes()[0..size]);
-        break;
+        try decoder.decode(buf[0..amt]);
     }
+
+    const result = try decoder.result();
+    defer gpa.free(result);
+    const size = @field(@TypeOf(context.response), "size");
+    @memcpy(mem.asBytes(&context.response)[0..size], result[0..size]);
+
     return context;
 }

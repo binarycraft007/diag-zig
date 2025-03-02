@@ -11,24 +11,6 @@ pub fn build(b: *std.Build) void {
     //    .optimize = optimize,
     //});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "hdlc",
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    lib.addCSourceFiles(.{
-        .files = &.{
-            "src/hdlc/crc-ccitt.c",
-            "src/hdlc/diagchar_hdlc.c",
-        },
-        .flags = &.{},
-    });
-    lib.addIncludePath(b.path("src"));
-    lib.installHeadersDirectory(b.path("src/hdlc"), "", .{
-        .include_extensions = &.{".h"},
-    });
-
     const translate_c = b.addTranslateC(.{
         .root_source_file = b.path("src/c.h"),
         .target = target,
@@ -50,7 +32,6 @@ pub fn build(b: *std.Build) void {
     //if (t.os.tag == .linux) {
     //    exe.linkSystemLibrary("libudev");
     //}
-    exe.linkLibrary(lib);
     exe.linkSystemLibrary("usb-1.0");
     b.installArtifact(exe);
 
@@ -74,7 +55,6 @@ pub fn build(b: *std.Build) void {
     //    exe_unit_tests.linkSystemLibrary("libudev");
     //}
     exe_unit_tests.linkSystemLibrary("usb-1.0");
-    exe_unit_tests.linkLibrary(lib);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
     const test_step = b.step("test", "Run unit tests");

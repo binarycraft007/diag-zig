@@ -1,6 +1,5 @@
 const std = @import("std");
 const mem = std.mem;
-const c = @import("c");
 const assert = std.debug.assert;
 const testing = std.testing;
 
@@ -9,72 +8,131 @@ const TestData = struct {
     output: []const u8,
 };
 
-pub const Payload = struct {
-    const Buf = std.ArrayList(u8);
+const ESCAPE_CHAR = '\x7d';
+const TRAILER_CHAR = '\x7e';
 
-    buf: Buf,
-    size: usize = 0,
+pub const Encoder = struct {
+    gpa: mem.Allocator,
 
-    pub fn init(gpa: mem.Allocator, cap: usize) !Payload {
-        var buf = try Buf.initCapacity(gpa, cap);
-        buf.expandToCapacity();
-        return .{ .buf = buf };
-    }
+    pub fn encode(self: *Encoder, buf: []const u8) ![]u8 {
+        var payload = try std.ArrayList(u8).initCapacity(self.gpa, buf.len * 2);
+        var crc = CrcCcitt.init();
+        for (buf) |b| {
+            crc.update(&.{b});
+            if (b == ESCAPE_CHAR or b == TRAILER_CHAR) {
+                try payload.appendSlice(&.{ ESCAPE_CHAR, b ^ 0x20 });
+            } else {
+                try payload.append(b);
+            }
+        }
+        const crc_final = ~crc.final();
+        const crc_bytes = mem.asBytes(&crc_final);
+        inline for (crc_bytes) |b| {
+            if (b == ESCAPE_CHAR or b == TRAILER_CHAR) {
+                try payload.appendSlice(&.{ ESCAPE_CHAR, b ^ 0x20 });
+            } else {
+                try payload.append(b);
+            }
+        }
+        try payload.append(TRAILER_CHAR);
 
-    pub fn deinit(self: *Payload) void {
-        self.buf.deinit();
-    }
-
-    pub fn bytes(self: *Payload) []const u8 {
-        return self.buf.items[0..self.size];
+        return try payload.toOwnedSlice();
     }
 };
 
-pub fn encode(gpa: mem.Allocator, buf: []const u8) !Payload {
-    var payload = try Payload.init(gpa, buf.len * 2);
+pub const Decoder = struct {
+    gpa: mem.Allocator,
+    state: State = .start,
+    decoded: std.ArrayList(u8),
 
-    // Set up the send descriptor
-    var src_desc: c.diag_send_desc_type = .{
-        .pkt = buf.ptr,
-        .last = &buf[buf.len - 1],
-        .state = c.DIAG_STATE_START,
-        .terminate = 1, // Signal that we want to terminate the packet
+    pub const State = enum {
+        start,
+        need_more,
+        done,
     };
 
-    // Set up the destination structure
-    var enc: c.diag_hdlc_dest_type = .{
-        .dest = payload.buf.items.ptr,
-        .dest_last = &payload.buf.items[payload.buf.items.len - 1],
-        .crc = 0xffff, // Start with the defined CRC seed
+    pub const DecodeError = error{
+        TrailerNotFound,
+        InvalidEscapeSequence,
+        InvalidPayload,
+        CrcMismatch,
     };
 
-    // Encode the DIAG packet
-    c.diag_hdlc_encode(&src_desc, &enc);
-    payload.size = mem.indexOfScalar(u8, payload.buf.items, '\x7e').? + 1;
+    pub fn init(gpa: mem.Allocator) Decoder {
+        return .{
+            .gpa = gpa,
+            .decoded = std.ArrayList(u8).init(gpa),
+        };
+    }
 
-    return payload;
-}
+    pub fn decode(self: *Decoder, encoded: []const u8) !void {
+        if (self.state == .done) return;
 
-pub fn decode(gpa: mem.Allocator, buf: []const u8) !Payload {
-    var payload = try Payload.init(gpa, buf.len);
+        try self.decoded.ensureTotalCapacity(self.decoded.items.len + encoded.len);
 
-    var hdlc: c.diag_hdlc_decode_type = .{
-        .src_ptr = @constCast(buf.ptr),
-        .dest_ptr = payload.buf.items.ptr,
-        .src_size = @intCast(buf.len),
-        .dest_size = @intCast(payload.buf.items.len),
-        .src_idx = 0,
-        .dest_idx = 0,
-        .escaping = 0,
-    };
+        self.state = .need_more;
 
-    // Decode the packet.
-    const ret = c.diag_hdlc_decode(&hdlc);
-    _ = ret;
-    payload.size = hdlc.dest_idx - 3;
+        var i: usize = 0;
+        // Process each byte until we hit the unescaped trailer char.
+        while (i < encoded.len) : (i += 1) {
+            const byte = encoded[i];
+            if (byte == TRAILER_CHAR) {
+                // End-of-packet marker found.
+                self.state = .done;
+                break;
+            } else if (byte == ESCAPE_CHAR) {
+                // Ensure there is another byte following the escape.
+                i += 1;
+                if (i >= encoded.len) {
+                    return DecodeError.InvalidEscapeSequence;
+                }
+                const next_byte = encoded[i] ^ 0x20;
+                try self.decoded.append(next_byte);
+            } else {
+                try self.decoded.append(byte);
+            }
+        }
+    }
 
-    return payload;
-}
+    pub fn result(self: *Decoder) ![]u8 {
+        std.debug.assert(self.state == .done);
+
+        // At this point, 'decoded' holds the original data with two CRC bytes appended.
+        if (self.decoded.items.len < 2) {
+            return DecodeError.InvalidPayload;
+        }
+
+        // Separate the CRC bytes from the data.
+        const data_len = self.decoded.items.len - 2;
+        const data = self.decoded.items[0..data_len];
+        const crc_bytes = self.decoded.items[data_len..];
+
+        // Compute the CRC over the data bytes.
+        var crc = CrcCcitt.init();
+        for (data) |b| {
+            crc.update(&.{b});
+        }
+        const computed_crc = ~crc.final();
+
+        // Convert the two CRC bytes to a u16.
+        // This assumes that the two bytes are in the same endianness as the computed CRC.
+        const expected_crc: *const u16 = @ptrCast(@alignCast(crc_bytes));
+
+        if (computed_crc != expected_crc.*) {
+            return DecodeError.CrcMismatch;
+        }
+
+        try self.decoded.resize(data_len);
+
+        // If desired, you can return just the data or a struct containing both the data and CRC.
+        // Here we return the data.
+        return try self.decoded.toOwnedSlice();
+    }
+
+    pub fn deinit(self: *Decoder) void {
+        self.decoded.deinit();
+    }
+};
 
 test "hdlc encode" {
     const test_data = [_]TestData{
@@ -88,16 +146,21 @@ test "hdlc encode" {
         },
     };
 
+    var encoder: Encoder = .{ .gpa = testing.allocator };
     for (test_data) |d| {
-        var encoded = try encode(testing.allocator, d.input);
-        defer encoded.deinit();
-        try testing.expectEqualSlices(u8, d.output, encoded.bytes());
+        const encoded = try encoder.encode(d.input);
+        defer testing.allocator.free(encoded);
+        try testing.expectEqualSlices(u8, d.output, encoded);
     }
 
     for (test_data) |d| {
-        var decoded = try decode(testing.allocator, d.output);
-        defer decoded.deinit();
-        try testing.expectEqualSlices(u8, d.input, decoded.bytes());
+        var decoder = Decoder.init(testing.allocator);
+        defer decoder.deinit();
+
+        try decoder.decode(d.output);
+        const decoded = try decoder.result();
+        defer testing.allocator.free(decoded);
+        try testing.expectEqualSlices(u8, d.input, decoded);
     }
 }
 
