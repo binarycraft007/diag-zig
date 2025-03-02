@@ -100,3 +100,11 @@ test "hdlc encode" {
         try testing.expectEqualSlices(u8, d.input, decoded.bytes());
     }
 }
+
+const CrcCcitt = std.hash.crc.Crc(u16, .{
+    .polynomial = 0x1021,
+    .initial = 0xffff,
+    .reflect_input = true,
+    .reflect_output = true,
+    .xor_output = 0x0000,
+});
