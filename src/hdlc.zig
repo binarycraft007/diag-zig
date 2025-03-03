@@ -108,17 +108,10 @@ pub const Decoder = struct {
         const crc_bytes = self.decoded.items[data_len..];
 
         // Compute the CRC over the data bytes.
-        var crc = CrcCcitt.init();
-        for (data) |b| {
-            crc.update(&.{b});
-        }
-        const computed_crc = ~crc.final();
+        const computed_crc = ~CrcCcitt.hash(data);
 
-        // Convert the two CRC bytes to a u16.
         // This assumes that the two bytes are in the same endianness as the computed CRC.
-        const expected_crc: *const u16 = @ptrCast(@alignCast(crc_bytes));
-
-        if (computed_crc != expected_crc.*) {
+        if (!mem.eql(u8, mem.asBytes(&computed_crc), crc_bytes)) {
             return DecodeError.CrcMismatch;
         }
 

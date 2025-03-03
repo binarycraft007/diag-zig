@@ -17,19 +17,44 @@ pub fn main() !void {
     defer iface.deinit();
 
     {
-        const resp = try diag.sendAndRecv(efs2.Hello, gpa, iface.writer(), iface.reader());
+        const resp = try diag.sendAndRecv(diag.Loopback, .{}, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
     }
 
     {
-        const resp = try diag.sendAndRecv(efs2.Query, gpa, iface.writer(), iface.reader());
+        const resp = try diag.sendAndRecv(diag.VersionInfo, .{}, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.SystemOperations, gpa, iface.writer(), iface.reader());
+        const resp = try diag.sendAndRecv(diag.ServiceProgramming, .{}, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
     }
+
+    {
+        const resp = try diag.sendAndRecv(diag.ExtBuildId, .{}, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
+        const resp = try diag.sendAndRecv(diag.NvRead, .{ .item = 0 }, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
+        const resp = try diag.sendAndRecv(efs2.Hello, .{}, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
+        const resp = try diag.sendAndRecv(efs2.Query, .{}, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    //{
+    //    const resp = try diag.sendAndRecv(diag.SystemOperations, gpa, &iface);
+    //    std.debug.print("{any}\n", .{resp});
+    //}
 }
 
 test "simple test" {

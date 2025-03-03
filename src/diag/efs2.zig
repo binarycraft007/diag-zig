@@ -93,28 +93,6 @@ pub const Hello = struct {
         max_version: u32 = 1, // Highest supported protocol version number
         feature_bits: u32 = 0xffffffff, // Feature bit mask; one bit per feature
         padding: u32 = 0,
-
-        pub fn asBytes(self: *Self) []const u8 {
-            return mem.asBytes(self)[0..size];
-        }
-
-        pub fn send(self: *Self, gpa: mem.Allocator, writer: anytype) !void {
-            var result = try hdlc.encode(gpa, self.asBytes());
-            defer result.deinit();
-
-            try writer.writeAll(result.bytes());
-        }
-
-        pub fn recv(gpa: mem.Allocator, reader: anytype) !Self {
-            var buf: [512]u8 = undefined;
-            const amt = try reader.read(&buf);
-            var result = try hdlc.decode(gpa, buf[0..amt]);
-            defer result.deinit();
-
-            var resp: Self = .{};
-            @memcpy(mem.asBytes(&resp)[0..size], result.bytes()[0..size]);
-            return resp;
-        }
     };
 
     pub const Response = Request;
@@ -134,18 +112,7 @@ pub const Query = struct {
             .subsys_id = @intFromEnum(diag.Subsys.fs),
             .subsys_cmd_code = @intFromEnum(Command.query),
         },
-        padding: u32 = 0,
-
-        pub fn asBytes(self: *Self) []const u8 {
-            return mem.asBytes(self)[0..size];
-        }
-
-        pub fn send(self: *Self, gpa: mem.Allocator, writer: anytype) !void {
-            var result = try hdlc.encode(gpa, self.asBytes());
-            defer result.deinit();
-
-            try writer.writeAll(result.bytes());
-        }
+        padding: u32 = 0x00,
     };
 
     pub const Response = packed struct {
@@ -165,21 +132,6 @@ pub const Query = struct {
         max_file_size: u32 = 0, // Maximum size of a file in bytes
         max_dir_entries: u32 = 0, // Maximum number of entries in a directory
         max_mounts: u32 = 0, // Maximum number of filesystem mounts
-        padding: u32 = 0,
-
-        pub fn asBytes(self: *Self) []const u8 {
-            return mem.asBytes(self)[0..size];
-        }
-
-        pub fn recv(gpa: mem.Allocator, reader: anytype) !Self {
-            var buf: [512]u8 = undefined;
-            const amt = try reader.read(&buf);
-            var result = try hdlc.decode(gpa, buf[0..amt]);
-            defer result.deinit();
-
-            var resp: Self = .{};
-            @memcpy(mem.asBytes(&resp)[0..size], result.bytes()[0..size]);
-            return resp;
-        }
+        padding: u32 = 0x00,
     };
 };

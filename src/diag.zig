@@ -11,6 +11,9 @@ pub const Subsys = enum(u8) {
         subsys_cmd_code: u16,
     };
 
+    pub const nv_read_ext_f = 1; // NV ext subsys command for NV-item read
+    pub const nv_write_ext_f = 2; // NV ext subsys command for NV-item write
+
     oem = 0,
     zrex = 1,
     sd = 2,
@@ -286,22 +289,29 @@ pub const Command = enum(u8) {
     //max_f = 157,
 };
 
-pub const Mode = enum(u16) {
-    offline_a_f = 0, // Go to offline analog */
-    offline_d_f, // Go to offline digital */
-    reset_f, // Reset. Only exit from offline */
-    ftm_f, // FTM mode - if supported */
-    online_f, // Online mode - if supported */
-    lpm_f, // LPM mode - if supported */
-    power_off_f, // Power off mode */
-    camp_only_f, // Camp Only Mode */
-    sdrm_f, // SDRM mode */
-    max_f, // Last (and invalid) mode enum value */
+pub const Mode = enum(u8) {
+    offline_a_f = 0, // Go to offline analog
+    offline_d_f, // Go to offline digital
+    reset_f, // Reset. Only exit from offline
+    ftm_f, // FTM mode - if supported
+    online_f, // Online mode - if supported
+    lpm_f, // LPM mode - if supported
+    power_off_f, // Power off mode
+    camp_only_f, // Camp Only Mode
+    sdrm_f, // SDRM mode
+    max_f, // Last (and invalid) mode enum value
 };
 
 pub const Control = packed struct {
-    cmd_code: u8,
-    mode: u16,
+    const Self = @This();
+    pub const size = @sizeOf(Self);
+
+    pub const diag_cm_reset = 2;
+    pub const diag_cm_power_off = 6;
+
+    cmd_code: u8 = @intFromEnum(Command.control_f),
+    mode: u8,
+    padding: u8 = 0,
 };
 
 pub const SystemOperations = struct {
@@ -319,40 +329,248 @@ pub const SystemOperations = struct {
             .subsys_cmd_code = edl_reset_cmd_code,
         },
         padding: u32 = 0x00,
-
-        pub fn asBytes(self: *Self) []const u8 {
-            return mem.asBytes(self)[0..size];
-        }
     };
 
     pub const Response = Request;
 };
 
-pub fn sendAndRecv(comptime T: type, gpa: mem.Allocator, writer: anytype, reader: anytype) !T {
-    var context: T = .{};
+pub const Loopback = struct {
+    request: Request = .{},
+    response: Response = .{},
+    pub const Request = packed struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        pub const Header = packed struct {
+            cmd_code: u8 = @intFromEnum(Command.protocol_loopback_f),
+            padding: u8 = 0x00,
+        };
+        header: Header = .{},
+        data1: u8 = 0x01,
+        data2: u8 = 0x02,
+        data3: u8 = 0x03,
+        data4: u8 = 0x04,
+        data5: u8 = 0x05,
+        data6: u8 = 0x06,
+        data7: u8 = 0x07,
+        data8: u8 = 0x08,
+        data9: u8 = 0x09,
+        padding: u8 = 0,
+    };
+
+    pub const Response = Request;
+};
+
+pub const VersionInfo = struct {
+    pub const date_strlen = 11;
+    pub const time_strlen = 8;
+    pub const dir_strlen = 8;
+
+    request: Request = .{},
+    response: Response = undefined,
+
+    pub const Header = packed struct {
+        cmd_code: u8 = @intFromEnum(Command.verno_f),
+    };
+    pub const Request = packed struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header = .{},
+        padding: u8 = 0,
+    };
+    pub const Response = extern struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header align(1) = .{},
+
+        comp_date: [date_strlen]u8 align(1), // Compile date Jun 11 1991
+        comp_time: [time_strlen]u8 align(1), // Compile time hh:mm:ss
+        rel_date: [date_strlen]u8 align(1), // Release date
+        rel_time: [time_strlen]u8 align(1), // Release time
+        ver_dir: [dir_strlen]u8 align(1), // Version directory
+        scm: u8 align(1), // Station Class Mark
+        mob_cai_rev: u8 align(1), // CAI rev
+        mob_model: u8 align(1), // Mobile Model
+        mob_firm_rev: u16 align(1), // Firmware Rev
+        slot_cycle_index: u8 align(1), // Slot Cycle Index
+        hw_maj_ver: u8 align(1), // Hardware Version MSB
+        hw_min_ver: u8 align(1), // Hardware Version LSB
+        padding: u8 = 0,
+    };
+};
+
+pub const ServiceProgramming = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const ServiceCode = packed struct {
+        digit0: u8 = 0x30,
+        digit1: u8 = 0x30,
+        digit2: u8 = 0x30,
+        digit3: u8 = 0x30,
+        digit4: u8 = 0x30,
+        digit5: u8 = 0x30,
+    };
+
+    pub const Header = packed struct {
+        cmd_code: u8 = @intFromEnum(Command.spc_f),
+    };
+
+    pub const Request = packed struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header = .{},
+        sec_code: ServiceCode = .{},
+        padding: u8 = 0x00,
+    };
+    pub const Response = packed struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header = .{},
+        sec_code_ok: u8 = 0x00,
+        padding: u8 = 0x00,
+    };
+};
+
+pub const ExtBuildId = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Header = packed struct {
+        cmd_code: u8 = @intFromEnum(Command.ext_build_id_f),
+    };
+    pub const Request = packed struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header = .{},
+        padding: u8 = 0,
+    };
+    pub const Response = extern struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header = .{},
+        msm_hw_version_format: u8 = 0,
+        reserved: [2]u8 = [_]u8{0} ** 2, // for alignment / future use
+
+        msm_hw_version: u32 = 0,
+        mobile_model_id: u32 = 0,
+
+        // The following character array contains 2 NULL terminated strings:
+        // 'build_id' string, followed by 'model_string'
+        ver_strings: [1]u8 = undefined,
+        padding: u8 = 0x00,
+    };
+};
+
+pub const NvReadExt = struct {
+    const nv_item_size = 128;
+    const max_nv_id = 0xffff;
+
+    request: Request = .{ .item = max_nv_id },
+    response: Response = .{ .item = max_nv_id },
+
+    pub const Header = packed struct {
+        cmd_code: u8 = @intFromEnum(Command.nv_read_f),
+    };
+    pub const Request = extern struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Subsys.Header align(1) = .{
+            .cmd_code = @intFromEnum(Command.subsys_cmd_f),
+            .subsys_id = Subsys.nv,
+            .subsys_cmd_code = Subsys.nv_read_ext_f,
+        },
+        item: u16 align(1), // Which item - use nv_items_enum_type
+        context: u16 align(1) = 0,
+        item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
+        nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
+        padding: u8 = 0x00,
+    };
+
+    pub const Response = Request;
+};
+
+pub const NvRead = struct {
+    const nv_item_size = 128;
+    const max_nv_id = 0xffff;
+
+    request: Request = .{ .item = max_nv_id },
+    response: Response = .{ .item = max_nv_id },
+
+    pub const Header = packed struct {
+        cmd_code: u8 = @intFromEnum(Command.nv_read_f),
+    };
+    pub const Request = extern struct {
+        const Self = @This();
+
+        pub const size = @bitOffsetOf(Self, "padding") / 8;
+
+        header: Header align(1) = .{},
+        item: u16 align(1), // Which item - use nv_items_enum_type
+        item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
+        nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
+        padding: u8 = 0x00,
+    };
+
+    pub const Response = Request;
+};
+
+pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !T {
+    var context: T = .{ .request = data };
+    const req_size = @field(@TypeOf(context.request), "size");
+    const rep_size = @field(@TypeOf(context.response), "size");
+
     var encoder: hdlc.Encoder = .{ .gpa = gpa };
-    const req = try encoder.encode(context.request.asBytes());
+    const req = try encoder.encode(mem.asBytes(&context.request)[0..req_size]);
     defer gpa.free(req);
 
-    try writer.writeAll(req);
+    try driver.writer().writeAll(req);
 
     var decoder = hdlc.Decoder.init(gpa);
     defer decoder.deinit();
     const header_bytes = mem.asBytes(&context.request.header);
     while (decoder.state != .done) {
         var buf: [512]u8 = undefined;
-        const amt = try reader.read(&buf);
-        if (decoder.state == .start and !mem.eql(u8, buf[0..header_bytes.len], header_bytes)) {
+        const amt = try driver.reader().read(&buf);
+        if (decoder.state == .start) {
+            const cmd: Command = @enumFromInt(buf[0]);
+            switch (cmd) {
+                .bad_cmd_f,
+                .bad_mode_f,
+                .bad_parm_f,
+                .bad_len_f,
+                => {
+                    if (mem.eql(u8, buf[1..header_bytes.len], header_bytes)) {
+                        return error.UnsupportCommand;
+                    }
+                },
+                else => {},
+            }
+        }
+        if (!mem.eql(u8, buf[0..header_bytes.len], header_bytes)) {
             continue;
         }
-
         try decoder.decode(buf[0..amt]);
     }
 
     const result = try decoder.result();
     defer gpa.free(result);
-    const size = @field(@TypeOf(context.response), "size");
-    @memcpy(mem.asBytes(&context.response)[0..size], result[0..size]);
+    @memcpy(mem.asBytes(&context.response)[0..rep_size], result[0..rep_size]);
 
     return context;
 }

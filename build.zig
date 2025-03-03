@@ -17,7 +17,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    translate_c.addIncludePath(b.path("src/hdlc"));
+    translate_c.addIncludePath(b.path("src"));
     //translate_c.addIncludePath(libusb.path("libusb"));
 
     const exe = b.addExecutable(.{
