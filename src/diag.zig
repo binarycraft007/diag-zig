@@ -311,7 +311,6 @@ pub const Control = packed struct {
 
     cmd_code: u8 = @intFromEnum(Command.control_f),
     mode: u8,
-    padding: u8 = 0,
 };
 
 pub const SystemOperations = struct {
@@ -328,7 +327,6 @@ pub const SystemOperations = struct {
             .subsys_id = @intFromEnum(Subsys.system_operations),
             .subsys_cmd_code = edl_reset_cmd_code,
         },
-        padding: u32 = 0x00,
     };
 
     pub const Response = Request;
@@ -337,6 +335,7 @@ pub const SystemOperations = struct {
 pub const Loopback = struct {
     request: Request = .{},
     response: Response = .{},
+
     pub const Request = packed struct {
         const Self = @This();
 
@@ -356,7 +355,6 @@ pub const Loopback = struct {
         data7: u8 = 0x07,
         data8: u8 = 0x08,
         data9: u8 = 0x09,
-        padding: u8 = 0,
     };
 
     pub const Response = Request;
@@ -373,6 +371,7 @@ pub const VersionInfo = struct {
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.verno_f),
     };
+
     pub const Request = packed struct {
         const Self = @This();
 
@@ -381,6 +380,7 @@ pub const VersionInfo = struct {
         header: Header = .{},
         padding: u8 = 0,
     };
+
     pub const Response = extern struct {
         const Self = @This();
 
@@ -400,7 +400,6 @@ pub const VersionInfo = struct {
         slot_cycle_index: u8 align(1), // Slot Cycle Index
         hw_maj_ver: u8 align(1), // Hardware Version MSB
         hw_min_ver: u8 align(1), // Hardware Version LSB
-        padding: u8 = 0,
     };
 };
 
@@ -428,8 +427,8 @@ pub const ServiceProgramming = struct {
 
         header: Header = .{},
         sec_code: ServiceCode = .{},
-        padding: u8 = 0x00,
     };
+
     pub const Response = packed struct {
         const Self = @This();
 
@@ -437,7 +436,6 @@ pub const ServiceProgramming = struct {
 
         header: Header = .{},
         sec_code_ok: u8 = 0x00,
-        padding: u8 = 0x00,
     };
 };
 
@@ -448,6 +446,7 @@ pub const ExtBuildId = struct {
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.ext_build_id_f),
     };
+
     pub const Request = packed struct {
         const Self = @This();
 
@@ -456,6 +455,7 @@ pub const ExtBuildId = struct {
         header: Header = .{},
         padding: u8 = 0,
     };
+
     pub const Response = extern struct {
         const Self = @This();
 
@@ -471,7 +471,6 @@ pub const ExtBuildId = struct {
         // The following character array contains 2 NULL terminated strings:
         // 'build_id' string, followed by 'model_string'
         ver_strings: [1]u8 = undefined,
-        padding: u8 = 0x00,
     };
 };
 
@@ -485,6 +484,7 @@ pub const NvReadExt = struct {
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.nv_read_f),
     };
+
     pub const Request = extern struct {
         const Self = @This();
 
@@ -492,14 +492,13 @@ pub const NvReadExt = struct {
 
         header: Subsys.Header align(1) = .{
             .cmd_code = @intFromEnum(Command.subsys_cmd_f),
-            .subsys_id = Subsys.nv,
+            .subsys_id = @intFromEnum(Subsys.nv),
             .subsys_cmd_code = Subsys.nv_read_ext_f,
         },
         item: u16 align(1), // Which item - use nv_items_enum_type
         context: u16 align(1) = 0,
         item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
         nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
-        padding: u8 = 0x00,
     };
 
     pub const Response = Request;
@@ -515,6 +514,7 @@ pub const NvRead = struct {
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.nv_read_f),
     };
+
     pub const Request = extern struct {
         const Self = @This();
 
@@ -524,7 +524,6 @@ pub const NvRead = struct {
         item: u16 align(1), // Which item - use nv_items_enum_type
         item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
         nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
-        padding: u8 = 0x00,
     };
 
     pub const Response = Request;
@@ -532,8 +531,8 @@ pub const NvRead = struct {
 
 pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !T {
     var context: T = .{ .request = data };
-    const req_size = @field(@TypeOf(context.request), "size");
-    const rep_size = @field(@TypeOf(context.response), "size");
+    const req_size = dataSize(context.request);
+    const rep_size = dataSize(context.response);
 
     var encoder: hdlc.Encoder = .{ .gpa = gpa };
     const req = try encoder.encode(mem.asBytes(&context.request)[0..req_size]);
@@ -573,4 +572,13 @@ pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver
     @memcpy(mem.asBytes(&context.response)[0..rep_size], result[0..rep_size]);
 
     return context;
+}
+
+pub fn dataSize(data: anytype) usize {
+    const DataType = @TypeOf(data);
+    const fields = std.meta.fields(DataType);
+    const last_field = fields[fields.len - 1];
+    const last_field_size = @sizeOf(@TypeOf(@field(data, last_field.name)));
+    const bit_size = last_field_size * 8 + @bitOffsetOf(DataType, last_field.name);
+    return @min(@sizeOf(DataType), bit_size / 8);
 }

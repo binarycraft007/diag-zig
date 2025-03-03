@@ -42,6 +42,11 @@ pub fn main() !void {
     }
 
     {
+        const resp = try diag.sendAndRecv(diag.NvReadExt, .{ .item = 10 }, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
+
+    {
         const resp = try diag.sendAndRecv(efs2.Hello, .{}, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
     }

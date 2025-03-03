@@ -92,7 +92,6 @@ pub const Hello = struct {
         min_version: u32 = 1, // Smallest supported protocol version number
         max_version: u32 = 1, // Highest supported protocol version number
         feature_bits: u32 = 0xffffffff, // Feature bit mask; one bit per feature
-        padding: u32 = 0,
     };
 
     pub const Response = Request;
@@ -112,7 +111,6 @@ pub const Query = struct {
             .subsys_id = @intFromEnum(diag.Subsys.fs),
             .subsys_cmd_code = @intFromEnum(Command.query),
         },
-        padding: u32 = 0x00,
     };
 
     pub const Response = packed struct {
@@ -132,6 +130,5 @@ pub const Query = struct {
         max_file_size: u32 = 0, // Maximum size of a file in bytes
         max_dir_entries: u32 = 0, // Maximum number of entries in a directory
         max_mounts: u32 = 0, // Maximum number of filesystem mounts
-        padding: u32 = 0x00,
     };
 };
