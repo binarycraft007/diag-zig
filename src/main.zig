@@ -42,7 +42,7 @@ pub fn main() !void {
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.NvReadExt, .{ .item = 10 }, gpa, &iface);
+        const resp = try diag.sendAndRecv(diag.NvReadExt, .{ .item = 6372, .context = 2 }, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
     }
 
@@ -56,10 +56,10 @@ pub fn main() !void {
         std.debug.print("{any}\n", .{resp});
     }
 
-    //{
-    //    const resp = try diag.sendAndRecv(diag.SystemOperations, gpa, &iface);
-    //    std.debug.print("{any}\n", .{resp});
-    //}
+    {
+        const resp = try diag.sendAndRecv(diag.FeatureQuery, .{}, gpa, &iface);
+        std.debug.print("{any}\n", .{resp});
+    }
 }
 
 test "simple test" {

@@ -302,15 +302,25 @@ pub const Mode = enum(u8) {
     max_f, // Last (and invalid) mode enum value
 };
 
-pub const Control = packed struct {
-    const Self = @This();
-    pub const size = @sizeOf(Self);
+pub const Control = struct {
+    request: Request = .{},
+    response: Response = .{},
 
-    pub const diag_cm_reset = 2;
-    pub const diag_cm_power_off = 6;
+    pub const Request = packed struct {
+        const Self = @This();
 
-    cmd_code: u8 = @intFromEnum(Command.control_f),
-    mode: u8,
+        pub const diag_cm_reset = 2;
+        pub const diag_cm_power_off = 6;
+
+        pub const Header = packed struct {
+            cmd_code: u8 = @intFromEnum(Command.control_f),
+        };
+        header: Header = .{},
+        mode: Mode = .offline_a_f,
+        reserved: u8 = 0x00,
+    };
+
+    pub const Response = Request;
 };
 
 pub const SystemOperations = struct {
@@ -339,13 +349,11 @@ pub const Loopback = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         pub const Header = packed struct {
             cmd_code: u8 = @intFromEnum(Command.protocol_loopback_f),
-            padding: u8 = 0x00,
         };
         header: Header = .{},
+        data0: u8 = 0x00,
         data1: u8 = 0x01,
         data2: u8 = 0x02,
         data3: u8 = 0x03,
@@ -375,16 +383,11 @@ pub const VersionInfo = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header = .{},
-        padding: u8 = 0,
     };
 
     pub const Response = extern struct {
         const Self = @This();
-
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
 
         header: Header align(1) = .{},
 
@@ -423,16 +426,12 @@ pub const ServiceProgramming = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header = .{},
         sec_code: ServiceCode = .{},
     };
 
     pub const Response = packed struct {
         const Self = @This();
-
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
 
         header: Header = .{},
         sec_code_ok: u8 = 0x00,
@@ -450,16 +449,11 @@ pub const ExtBuildId = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header = .{},
-        padding: u8 = 0,
     };
 
     pub const Response = extern struct {
         const Self = @This();
-
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
 
         header: Header = .{},
         msm_hw_version_format: u8 = 0,
@@ -472,6 +466,43 @@ pub const ExtBuildId = struct {
         // 'build_id' string, followed by 'model_string'
         ver_strings: [1]u8 = undefined,
     };
+};
+
+pub const FeatureQuery = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    const diag_feature_query = 0x225;
+    pub const Request = packed struct {
+        header: Subsys.Header = .{
+            .cmd_code = @intFromEnum(Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(Subsys.diag_serv),
+            .subsys_cmd_code = diag_feature_query,
+        },
+    };
+
+    pub const Response = extern struct {
+        header: Subsys.Header align(1) = undefined,
+        version: u8 align(1) = 0,
+        feature_len: u8 align(1) = 0,
+        feature_mask: [4]u8 align(1) = [_]u8{0} ** 4,
+    };
+};
+
+pub const NvStat = enum(u16) {
+    done, // Request was completed.
+    busy, // Request is queued.
+    badcmd, // Unrecognizable command field.
+    full, // NVM is full.
+    fail, // Command failed for a reason other than NVM full.
+    notactive, // Variable was not active.
+    badparm, // Bad parameter in the command block.
+    readonly, // Parameter is write-protected and thus read-only.
+    badtg, // Item is not valid for this target.
+    nomem, // Free memory has been exhausted.
+    notalloc, // Address is not a valid allocation.
+    ruim_not_supported, // NV item is not supported in RUIM
+    _,
 };
 
 pub const NvReadExt = struct {
@@ -488,8 +519,6 @@ pub const NvReadExt = struct {
     pub const Request = extern struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Subsys.Header align(1) = .{
             .cmd_code = @intFromEnum(Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(Subsys.nv),
@@ -498,7 +527,7 @@ pub const NvReadExt = struct {
         item: u16 align(1), // Which item - use nv_items_enum_type
         context: u16 align(1) = 0,
         item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
-        nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
+        nv_stat: NvStat align(1) = .done, // Status of operation - use nv_stat_enum_type
     };
 
     pub const Response = Request;
@@ -518,12 +547,10 @@ pub const NvRead = struct {
     pub const Request = extern struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header align(1) = .{},
         item: u16 align(1), // Which item - use nv_items_enum_type
         item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
-        nv_stat: u16 align(1) = 0x0000, // Status of operation - use nv_stat_enum_type
+        nv_stat: NvStat align(1) = .done, // Status of operation
     };
 
     pub const Response = Request;
