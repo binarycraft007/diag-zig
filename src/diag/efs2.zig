@@ -207,3 +207,58 @@ pub const Close = struct {
         errno: u32 = 0,
     };
 };
+
+pub const OpenDir = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.open),
+        },
+        path: [max_path]u8 align(1) = [_]u8{0} ** max_path,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.opendir),
+        },
+        fd: fd_t = 0,
+        errno: u32 = 0,
+    };
+};
+
+pub const CloseDir = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.closedir),
+        },
+        fd: fd_t align(1) = 0,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.open),
+        },
+        errno: u32 = 0,
+    };
+};
