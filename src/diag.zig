@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const hdlc = @import("hdlc.zig");
 
+pub const nv = @import("diag/nv.zig");
 pub const efs2 = @import("diag/efs2.zig");
 
 pub const Subsys = enum(u8) {
@@ -489,73 +490,6 @@ pub const FeatureQuery = struct {
     };
 };
 
-pub const NvStat = enum(u16) {
-    done, // Request was completed.
-    busy, // Request is queued.
-    badcmd, // Unrecognizable command field.
-    full, // NVM is full.
-    fail, // Command failed for a reason other than NVM full.
-    notactive, // Variable was not active.
-    badparm, // Bad parameter in the command block.
-    readonly, // Parameter is write-protected and thus read-only.
-    badtg, // Item is not valid for this target.
-    nomem, // Free memory has been exhausted.
-    notalloc, // Address is not a valid allocation.
-    ruim_not_supported, // NV item is not supported in RUIM
-    _,
-};
-
-pub const NvReadExt = struct {
-    const nv_item_size = 128;
-    const max_nv_id = 0xffff;
-
-    request: Request = .{ .item = max_nv_id },
-    response: Response = .{ .item = max_nv_id },
-
-    pub const Header = packed struct {
-        cmd_code: u8 = @intFromEnum(Command.nv_read_f),
-    };
-
-    pub const Request = extern struct {
-        const Self = @This();
-
-        header: Subsys.Header align(1) = .{
-            .cmd_code = @intFromEnum(Command.subsys_cmd_f),
-            .subsys_id = @intFromEnum(Subsys.nv),
-            .subsys_cmd_code = Subsys.nv_read_ext_f,
-        },
-        item: u16 align(1), // Which item - use nv_items_enum_type
-        context: u16 align(1) = 0,
-        item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
-        nv_stat: NvStat align(1) = .done, // Status of operation - use nv_stat_enum_type
-    };
-
-    pub const Response = Request;
-};
-
-pub const NvRead = struct {
-    const nv_item_size = 128;
-    const max_nv_id = 0xffff;
-
-    request: Request = .{ .item = max_nv_id },
-    response: Response = .{ .item = max_nv_id },
-
-    pub const Header = packed struct {
-        cmd_code: u8 = @intFromEnum(Command.nv_read_f),
-    };
-
-    pub const Request = extern struct {
-        const Self = @This();
-
-        header: Header align(1) = .{},
-        item: u16 align(1), // Which item - use nv_items_enum_type
-        item_data: [nv_item_size]u8 align(1) = [_]u8{0} ** nv_item_size, // Item itself - use nv_item_type
-        nv_stat: NvStat align(1) = .done, // Status of operation
-    };
-
-    pub const Response = Request;
-};
-
 pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !T {
     var context: T = .{ .request = data };
     const req_size = dataSize(context.request);
@@ -564,6 +498,8 @@ pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver
     var encoder: hdlc.Encoder = .{ .gpa = gpa };
     const req = try encoder.encode(mem.asBytes(&context.request)[0..req_size]);
     defer gpa.free(req);
+
+    std.debug.print("{x:0>2}\n", .{req});
 
     try driver.writer().writeAll(req);
 
@@ -576,13 +512,32 @@ pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver
         if (decoder.state == .start) {
             const cmd: Command = @enumFromInt(buf[0]);
             switch (cmd) {
-                .bad_cmd_f,
-                .bad_mode_f,
-                .bad_parm_f,
-                .bad_len_f,
-                => {
-                    if (mem.eql(u8, buf[1..header_bytes.len], header_bytes)) {
-                        return error.UnsupportCommand;
+                .bad_cmd_f => {
+                    if (mem.eql(u8, buf[1 .. header_bytes.len + 1], header_bytes)) {
+                        return error.BadCommand;
+                    } else {
+                        continue;
+                    }
+                },
+                .bad_mode_f => {
+                    if (mem.eql(u8, buf[1 .. header_bytes.len + 1], header_bytes)) {
+                        return error.BadMode;
+                    } else {
+                        continue;
+                    }
+                },
+                .bad_parm_f => {
+                    if (mem.eql(u8, buf[1 .. header_bytes.len + 1], header_bytes)) {
+                        return error.BadParameter;
+                    } else {
+                        continue;
+                    }
+                },
+                .bad_len_f => {
+                    if (mem.eql(u8, buf[1 .. header_bytes.len + 1], header_bytes)) {
+                        return error.BadLength;
+                    } else {
+                        continue;
                     }
                 },
                 else => {},

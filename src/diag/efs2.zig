@@ -4,6 +4,30 @@ const hdlc = @import("../hdlc.zig");
 const diag = @import("../diag.zig");
 const Header = diag.Subsys.Header;
 
+pub const fd_t = u32;
+pub const mode_t = u32;
+
+pub const max_path = 256;
+
+pub const O_ACCMODE = 0x0003;
+pub const O_RDONLY = 0x00;
+pub const O_WRONLY = 0x01;
+pub const O_RDWR = 0x02;
+pub const O_CREAT = 0x0100;
+pub const O_TRUNC = 0x01000;
+pub const O_APPEND = 0x02000;
+pub const O_NONBLOCK = 0x04000;
+
+// "User" permissions.
+pub const S_IRUSR = 0x0400; // User has Read permission.
+pub const S_IWUSR = 0x0200; // User has Write permission.
+pub const S_IXUSR = 0x0100; // User has eXecute permission.
+
+// BSD definitions. */
+pub const S_IREAD = S_IRUSR;
+pub const S_IWRITE = S_IWUSR;
+pub const S_IEXEC = S_IXUSR;
+
 pub const Command = enum(u16) {
     hello = 0,
     query = 1,
@@ -75,8 +99,6 @@ pub const Hello = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(diag.Subsys.fs),
@@ -104,8 +126,6 @@ pub const Query = struct {
     pub const Request = packed struct {
         const Self = @This();
 
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
-
         header: Header = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(diag.Subsys.fs),
@@ -115,8 +135,6 @@ pub const Query = struct {
 
     pub const Response = packed struct {
         const Self = @This();
-
-        pub const size = @bitOffsetOf(Self, "padding") / 8;
 
         header: Header = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
@@ -130,5 +148,62 @@ pub const Query = struct {
         max_file_size: u32 = 0, // Maximum size of a file in bytes
         max_dir_entries: u32 = 0, // Maximum number of entries in a directory
         max_mounts: u32 = 0, // Maximum number of filesystem mounts
+    };
+};
+
+pub const Open = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.open),
+        },
+        oflag: u32 align(1) = 0,
+        mode: mode_t align(1) = 0,
+        path: [max_path]u8 align(1) = [_]u8{0} ** max_path,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.open),
+        },
+        fd: fd_t = 0,
+        errno: u32 = 0,
+    };
+};
+
+pub const Close = struct {
+    request: Request = .{},
+    response: Response = .{},
+
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.close),
+        },
+        fd: fd_t align(1) = 0,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.open),
+        },
+        errno: u32 = 0,
     };
 };

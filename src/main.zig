@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
 const diag = @import("diag.zig");
+const nv = diag.nv;
 const efs2 = diag.efs2;
 const usb = @import("usb.zig");
 
@@ -37,29 +38,17 @@ pub fn main() !void {
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.NvRead, .{ .item = 0 }, gpa, &iface);
+        const path = "/nv/item_store/rfnv/rfnv.bl";
+        var req: efs2.Open.Request = .{};
+        @memcpy(req.path[0..path.len], path);
+        const resp = try diag.sendAndRecv(efs2.Open, req, gpa, &iface);
         std.debug.print("{any}\n", .{resp});
+
+        const resp1 = try diag.sendAndRecv(efs2.Close, .{ .fd = resp.response.fd }, gpa, &iface);
+        std.debug.print("{any}\n", .{resp1});
     }
 
-    {
-        const resp = try diag.sendAndRecv(diag.NvReadExt, .{ .item = 6372, .context = 2 }, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
-    }
-
-    {
-        const resp = try diag.sendAndRecv(efs2.Hello, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
-    }
-
-    {
-        const resp = try diag.sendAndRecv(efs2.Query, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
-    }
-
-    {
-        const resp = try diag.sendAndRecv(diag.FeatureQuery, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
-    }
+    //try nv.backup(gpa, &iface);
 }
 
 test "simple test" {
