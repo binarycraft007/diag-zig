@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const diag = @import("diag.zig");
 const nv = diag.nv;
 const efs2 = diag.efs2;
-const usb = @import("usb.zig");
 const log = std.log.scoped(.main);
 
 pub fn main() !void {
@@ -36,13 +35,20 @@ pub fn main() !void {
         if (decoder.body()) |body| log.info("{s}", .{body});
     }
 
+    {
+        const decoder = try client.send(efs2.Hello, .{});
+        defer decoder.deinit();
+    }
+
+    {
+        const decoder = try client.send(efs2.Query, .{});
+        defer decoder.deinit();
+    }
+
     var fd: efs2.fd_t = 0;
     var size: u32 = 0;
     {
-        const path = "/nv/item_store/rfnv/rfnv.bl";
-        var request: efs2.Open.Request = .{};
-        @memcpy(request.path[0..path.len], path);
-        const decoder = try client.send(efs2.Open, request);
+        const decoder = try client.send(efs2.Open, .{ .body = "/nv/item_store/rfnv/rfnv.bl" });
         defer decoder.deinit();
         fd = decoder.response().fd;
     }

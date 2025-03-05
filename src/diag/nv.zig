@@ -7,6 +7,13 @@ const filter = diag.filter;
 const nv_item_size = 128;
 const max_nv_id = 7233;
 
+pub const Command = enum(u8) {
+    write2_f = 0,
+    read_ext_f = 1, // NV ext subsys command for NV-item read
+    write_ext_f = 2, // NV ext subsys command for NV-item write
+    _,
+};
+
 pub const Stat = enum(u16) {
     done, // Request was completed.
     busy, // Request is queued.
@@ -47,7 +54,7 @@ pub const ReadExt = struct {
         header: diag.Subsys.Header align(1) = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(diag.Subsys.nv),
-            .subsys_cmd_code = diag.Subsys.nv_read_ext_f,
+            .subsys_cmd_code = Command.read_ext_f,
         },
         item: u16 align(1), // Which item - use nv_items_enum_type
         context: u16 align(1) = 0,
@@ -82,7 +89,7 @@ pub const WriteExt = struct {
         header: diag.Subsys.Header align(1) = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(diag.Subsys.nv),
-            .subsys_cmd_code = diag.Subsys.nv_write_ext_f,
+            .subsys_cmd_code = Command.write_ext_f,
         },
         item: u16 align(1), // Which item - use nv_items_enum_type
         context: u16 align(1) = 0,

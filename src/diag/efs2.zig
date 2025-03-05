@@ -170,7 +170,7 @@ pub const Open = struct {
         },
         oflag: u32 align(1) = 0,
         mode: mode_t align(1) = 0,
-        path: [max_path]u8 align(1) = [_]u8{0} ** max_path,
+        body: [*:0]const u8,
     };
 
     pub const Response = packed struct {
@@ -219,7 +219,7 @@ pub const OpenDir = struct {
             .subsys_id = @intFromEnum(diag.Subsys.fs),
             .subsys_cmd_code = @intFromEnum(Command.opendir),
         },
-        path: [max_path]u8 align(1) = [_]u8{0} ** max_path,
+        body: [*:0]const u8,
     };
 
     pub const Response = packed struct {

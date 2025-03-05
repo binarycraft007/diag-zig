@@ -3,6 +3,7 @@ const mem = std.mem;
 const usb = @import("usb.zig");
 const util = @import("util.zig");
 const hdlc = @import("hdlc.zig");
+const builtin = @import("builtin");
 
 pub const filter: Filter = @import("diag/qcn_filter.zon");
 
@@ -15,9 +16,9 @@ pub const Filter = struct {
         id: u16,
         num: u8,
     };
-    folders: []const File,
-    conf_list: []const File,
-    bl_list: []const File,
+    folders: []const File, // EFS Backup
+    conf_list: []const File, // Provisioning Item Files
+    bl_list: []const File, // EFS Backup
     nv_list: []const NvList,
 };
 
@@ -30,9 +31,6 @@ pub const Subsys = enum(u8) {
         subsys_id: u8,
         subsys_cmd_code: u16,
     };
-
-    pub const nv_read_ext_f = 1; // NV ext subsys command for NV-item read
-    pub const nv_write_ext_f = 2; // NV ext subsys command for NV-item write
 
     oem = 0,
     zrex = 1,
@@ -567,7 +565,8 @@ pub const Client = union(ClientKind) {
     }
 };
 
-pub const DiagErrno = enum(u32) {
+pub const E = enum(u32) {
+    SUCCESS = 0,
     EPERM = 1,
     ENOENT = 2,
     EEXIST = 6,
@@ -601,12 +600,50 @@ pub const DiagErrno = enum(u32) {
     EUNKNOWN_HFAT = 0x8002,
 };
 
+/// Obtains errno from the return value of a system function call.
+///
+/// For some systems this will obtain the value directly from the syscall return value;
+/// for others it will use a thread-local errno variable. Therefore, this
+/// function only returns a well-defined value when it is called directly after
+/// the system function call whose errno value is intended to be observed.
+pub fn errno(rc: u32) E {
+    return @enumFromInt(rc);
+}
+
+pub const UnexpectedError = error{
+    /// The Operating System returned an undocumented error code.
+    ///
+    /// This error is in theory not possible, but it would be better
+    /// to handle this error than to invoke undefined behavior.
+    ///
+    /// When this error code is observed, it usually means the Zig Standard
+    /// Library needs a small patch to add the error code to the error set for
+    /// the respective function.
+    Unexpected,
+};
+
+/// Whether or not `error.Unexpected` will print its value and a stack trace.
+///
+/// If this happens the fix is to add the error code to the corresponding
+/// switch expression, possibly introduce a new error in the error set, and
+/// send a patch to Zig.
+pub const unexpected_error_tracing = builtin.zig_backend == .stage2_llvm and builtin.mode == .Debug;
+
+/// Call this when you made a syscall or something that sets errno
+/// and you get an unexpected error.
+pub fn unexpectedErrno(err: E) UnexpectedError {
+    if (unexpected_error_tracing) {
+        std.debug.print("unexpected errno: {d}\n", .{@intFromEnum(err)});
+        std.debug.dumpCurrentStackTrace(null);
+    }
+    return error.Unexpected;
+}
+
 fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !hdlc.Decoder(T) {
     var request = data;
-    const req_size = util.dataSize(T.Request);
 
     var encoder: hdlc.Encoder = .{ .gpa = gpa };
-    const req = try encoder.encode(mem.asBytes(&request)[0..req_size]);
+    const req = try encoder.encode(&request);
     defer gpa.free(req);
 
     try driver.writer().writeAll(req);
@@ -659,9 +696,9 @@ fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: an
     try decoder.final();
 
     if (@hasField(T.Response, "errno")) {
-        switch (std.posix.errno(decoder.response().errno)) {
+        switch (errno(decoder.response().errno)) {
             .SUCCESS => {},
-            else => |e| return std.posix.unexpectedErrno(e),
+            else => |e| return unexpectedErrno(e),
         }
     }
 

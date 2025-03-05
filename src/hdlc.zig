@@ -15,8 +15,11 @@ const TRAILER_CHAR = '\x7e';
 pub const Encoder = struct {
     gpa: mem.Allocator,
 
-    pub fn encode(self: *Encoder, buf: []const u8) ![]u8 {
-        var payload = try std.ArrayList(u8).initCapacity(self.gpa, buf.len * 2);
+    pub fn encode(self: *Encoder, req: anytype) ![]u8 {
+        const RequestType = @TypeOf(req.*);
+        const size = util.dataSize(RequestType);
+        const buf = mem.asBytes(req)[0..size];
+        var payload = try std.ArrayList(u8).initCapacity(self.gpa, size * 2);
         var crc = CrcCcitt.init();
         for (buf) |b| {
             crc.update(&.{b});
@@ -25,6 +28,18 @@ pub const Encoder = struct {
             } else {
                 try payload.append(b);
             }
+        }
+        if (@hasField(RequestType, "body")) {
+            for (mem.sliceTo(req.body, 0)) |b| {
+                crc.update(&.{b});
+                if (b == ESCAPE_CHAR or b == TRAILER_CHAR) {
+                    try payload.appendSlice(&.{ ESCAPE_CHAR, b ^ 0x20 });
+                } else {
+                    try payload.append(b);
+                }
+            }
+            crc.update(&.{0x00});
+            try payload.append(0x00);
         }
         const crc_final = ~crc.final();
         const crc_bytes = mem.asBytes(&crc_final);
