@@ -5,50 +5,63 @@ const diag = @import("diag.zig");
 const nv = diag.nv;
 const efs2 = diag.efs2;
 const usb = @import("usb.zig");
+const log = std.log.scoped(.main);
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
     const gpa = gpa_state.allocator();
 
-    var ctx = try usb.Context.init();
-    defer ctx.deinit();
-
-    var iface = try usb.Interface.autoFind();
-    defer iface.deinit();
+    var client = try diag.Client.init(gpa, .usb);
+    defer client.deinit();
 
     {
-        const resp = try diag.sendAndRecv(diag.Loopback, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
+        const decoder = try client.send(diag.Loopback, .{});
+        defer decoder.deinit();
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.VersionInfo, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
+        const decoder = try client.send(diag.VersionInfo, .{});
+        defer decoder.deinit();
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.ServiceProgramming, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
+        const decoder = try client.send(diag.ServiceProgramming, .{});
+        defer decoder.deinit();
     }
 
     {
-        const resp = try diag.sendAndRecv(diag.ExtBuildId, .{}, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
+        const decoder = try client.send(diag.ExtBuildId, .{});
+        defer decoder.deinit();
+        if (decoder.body()) |body| log.info("{s}", .{body});
     }
 
+    var fd: efs2.fd_t = 0;
+    var size: u32 = 0;
     {
         const path = "/nv/item_store/rfnv/rfnv.bl";
-        var req: efs2.Open.Request = .{};
-        @memcpy(req.path[0..path.len], path);
-        const resp = try diag.sendAndRecv(efs2.Open, req, gpa, &iface);
-        std.debug.print("{any}\n", .{resp});
-
-        const resp1 = try diag.sendAndRecv(efs2.Close, .{ .fd = resp.response.fd }, gpa, &iface);
-        std.debug.print("{any}\n", .{resp1});
+        var request: efs2.Open.Request = .{};
+        @memcpy(request.path[0..path.len], path);
+        const decoder = try client.send(efs2.Open, request);
+        defer decoder.deinit();
+        fd = decoder.response().fd;
+    }
+    {
+        const decoder = try client.send(efs2.FStat, .{ .fd = fd });
+        defer decoder.deinit();
+        size = decoder.response().size;
+    }
+    {
+        const decoder = try client.send(efs2.Read, .{ .fd = fd, .nbyte = size });
+        defer decoder.deinit();
+        if (decoder.body()) |body| log.info("{s}", .{body});
+    }
+    {
+        const decoder = try client.send(efs2.Close, .{ .fd = fd });
+        defer decoder.deinit();
     }
 
-    //try nv.backup(gpa, &iface);
+    //try client.backup();
 }
 
 test "simple test" {

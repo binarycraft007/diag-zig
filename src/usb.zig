@@ -24,7 +24,7 @@ pub const Context = struct {
         return ctx;
     }
 
-    pub fn deinit(self: *Context) void {
+    pub fn deinit(self: Context) void {
         c.libusb_exit(self.ctx);
     }
 };
@@ -225,7 +225,7 @@ pub const Interface = struct {
         };
     }
 
-    pub fn deinit(self: *Interface) void {
+    pub fn deinit(self: Interface) void {
         defer if (self.handle) |h| {
             _ = c.libusb_release_interface(h, self.interface_number);
             c.libusb_close(h);

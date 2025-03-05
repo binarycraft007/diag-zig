@@ -1,6 +1,25 @@
 const std = @import("std");
 const mem = std.mem;
+const usb = @import("usb.zig");
+const util = @import("util.zig");
 const hdlc = @import("hdlc.zig");
+
+pub const filter: Filter = @import("diag/qcn_filter.zon");
+
+pub const Filter = struct {
+    pub const File = struct {
+        path: []const u8,
+    };
+    pub const NvList = struct {
+        category: []const u8,
+        id: u16,
+        num: u8,
+    };
+    folders: []const File,
+    conf_list: []const File,
+    bl_list: []const File,
+    nv_list: []const NvList,
+};
 
 pub const nv = @import("diag/nv.zig");
 pub const efs2 = @import("diag/efs2.zig");
@@ -304,14 +323,8 @@ pub const Mode = enum(u8) {
 };
 
 pub const Control = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = packed struct {
         const Self = @This();
-
-        pub const diag_cm_reset = 2;
-        pub const diag_cm_power_off = 6;
 
         pub const Header = packed struct {
             cmd_code: u8 = @intFromEnum(Command.control_f),
@@ -325,9 +338,6 @@ pub const Control = struct {
 };
 
 pub const SystemOperations = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = packed struct {
         const Self = @This();
         const edl_reset_cmd_code = 1;
@@ -344,9 +354,6 @@ pub const SystemOperations = struct {
 };
 
 pub const Loopback = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = packed struct {
         const Self = @This();
 
@@ -373,9 +380,6 @@ pub const VersionInfo = struct {
     pub const date_strlen = 11;
     pub const time_strlen = 8;
     pub const dir_strlen = 8;
-
-    request: Request = .{},
-    response: Response = undefined,
 
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.verno_f),
@@ -408,9 +412,6 @@ pub const VersionInfo = struct {
 };
 
 pub const ServiceProgramming = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const ServiceCode = packed struct {
         digit0: u8 = 0x30,
         digit1: u8 = 0x30,
@@ -440,9 +441,6 @@ pub const ServiceProgramming = struct {
 };
 
 pub const ExtBuildId = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Header = packed struct {
         cmd_code: u8 = @intFromEnum(Command.ext_build_id_f),
     };
@@ -465,14 +463,11 @@ pub const ExtBuildId = struct {
 
         // The following character array contains 2 NULL terminated strings:
         // 'build_id' string, followed by 'model_string'
-        ver_strings: [1]u8 = undefined,
+        //ver_strings: [1]u8 = undefined,
     };
 };
 
 pub const FeatureQuery = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     const diag_feature_query = 0x225;
     pub const Request = packed struct {
         header: Subsys.Header = .{
@@ -490,22 +485,134 @@ pub const FeatureQuery = struct {
     };
 };
 
-pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !T {
-    var context: T = .{ .request = data };
-    const req_size = dataSize(context.request);
-    const rep_size = dataSize(context.response);
+pub const ClientKind = enum {
+    usb,
+};
+
+pub const Client = union(ClientKind) {
+    usb: Usb,
+
+    pub const Usb = struct {
+        ctx: usb.Context,
+        driver: usb.Interface,
+        gpa: mem.Allocator,
+
+        pub fn deinit(self: Usb) void {
+            self.driver.deinit();
+            self.ctx.deinit();
+        }
+    };
+
+    pub fn init(gpa: mem.Allocator, kind: ClientKind) !Client {
+        switch (kind) {
+            .usb => {
+                const ctx = try usb.Context.init();
+                return @unionInit(Client, @tagName(kind), .{
+                    .gpa = gpa,
+                    .driver = try usb.Interface.autoFind(),
+                    .ctx = ctx,
+                });
+            },
+        }
+    }
+
+    pub fn deinit(self: *Client) void {
+        switch (self.*) {
+            inline else => |driver| return driver.deinit(),
+        }
+    }
+
+    pub fn send(self: *Client, comptime T: type, data: T.Request) !hdlc.Decoder(T) {
+        switch (self.*) {
+            inline else => |driver| return try sendAndRecv(T, data, driver.gpa, driver.driver),
+        }
+    }
+
+    pub fn backup(self: *Client) !void {
+        var legacy_nv: usize = 0;
+        for (filter.nv_list) |nv_item| {
+            const resp = self.send(nv.Read, .{ .item = nv_item.id }) catch |err| switch (err) {
+                error.BadParameter, error.BadLength => continue,
+                else => |e| return e,
+            };
+            defer resp.deinit();
+            if (resp.response().nv_stat == .done) {
+                legacy_nv += 1;
+            }
+        }
+
+        var sim_1_nv: usize = 0;
+        for (filter.nv_list) |nv_item| {
+            const resp = self.send(nv.ReadExt, .{ .item = nv_item.id, .context = 1 }) catch |err| switch (err) {
+                error.BadParameter, error.BadLength => continue,
+                else => |e| return e,
+            };
+            defer resp.deinit();
+            if (resp.response().nv_stat == .done) {
+                sim_1_nv += 1;
+            }
+        }
+
+        var sim_2_nv: usize = 0;
+        for (filter.nv_list) |nv_item| {
+            const resp = self.send(nv.ReadExt, .{ .item = nv_item.id, .context = 2 }) catch |err| switch (err) {
+                error.BadParameter, error.BadLength => continue,
+                else => |e| return e,
+            };
+            defer resp.deinit();
+            if (resp.response().nv_stat == .done) {
+                sim_2_nv += 1;
+            }
+        }
+    }
+};
+
+pub const DiagErrno = enum(u32) {
+    EPERM = 1,
+    ENOENT = 2,
+    EEXIST = 6,
+    EBADF = 9,
+    ENOMEM = 12,
+    EACCES = 13,
+    EBUSY = 16,
+    EXDEV = 18,
+    ENODEV = 19,
+    ENOTDIR = 20,
+    EISDIR = 21,
+    EINVAL = 22,
+    EMFILE = 24,
+    ETXTBSY = 26,
+    ENOSPC = 28,
+    ESPIPE = 29,
+    FS_ERANGE = 34,
+    ENAMETOOLONG = 36,
+    ENOTEMPTY = 39,
+    ELOOP = 40,
+    ETIMEDOUT = 110,
+    ESTALE = 116,
+    EDQUOT = 122,
+    ENOCARD = 301,
+    EBADFMT = 302,
+    ENOTITM = 303,
+    EROLLBACK = 304,
+    ENOTHINGTOSYNC = 306,
+    EEOF = 0x8000,
+    EUNKNOWN_SFAT = 0x8001,
+    EUNKNOWN_HFAT = 0x8002,
+};
+
+fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver: anytype) !hdlc.Decoder(T) {
+    var request = data;
+    const req_size = util.dataSize(T.Request);
 
     var encoder: hdlc.Encoder = .{ .gpa = gpa };
-    const req = try encoder.encode(mem.asBytes(&context.request)[0..req_size]);
+    const req = try encoder.encode(mem.asBytes(&request)[0..req_size]);
     defer gpa.free(req);
-
-    std.debug.print("{x:0>2}\n", .{req});
 
     try driver.writer().writeAll(req);
 
-    var decoder = hdlc.Decoder.init(gpa);
-    defer decoder.deinit();
-    const header_bytes = mem.asBytes(&context.request.header);
+    var decoder = hdlc.Decoder(T).init(gpa);
+    const header_bytes = mem.asBytes(&request.header);
     while (decoder.state != .done) {
         var buf: [512]u8 = undefined;
         const amt = try driver.reader().read(&buf);
@@ -549,18 +656,14 @@ pub fn sendAndRecv(comptime T: type, data: T.Request, gpa: mem.Allocator, driver
         try decoder.decode(buf[0..amt]);
     }
 
-    const result = try decoder.result();
-    defer gpa.free(result);
-    @memcpy(mem.asBytes(&context.response)[0..rep_size], result[0..rep_size]);
+    try decoder.final();
 
-    return context;
-}
+    if (@hasField(T.Response, "errno")) {
+        switch (std.posix.errno(decoder.response().errno)) {
+            .SUCCESS => {},
+            else => |e| return std.posix.unexpectedErrno(e),
+        }
+    }
 
-pub fn dataSize(data: anytype) usize {
-    const DataType = @TypeOf(data);
-    const fields = std.meta.fields(DataType);
-    const last_field = fields[fields.len - 1];
-    const last_field_size = @sizeOf(@TypeOf(@field(data, last_field.name)));
-    const bit_size = last_field_size * 8 + @bitOffsetOf(DataType, last_field.name);
-    return @min(@sizeOf(DataType), bit_size / 8);
+    return decoder;
 }

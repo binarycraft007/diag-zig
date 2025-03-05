@@ -18,6 +18,20 @@ pub const O_TRUNC = 0x01000;
 pub const O_APPEND = 0x02000;
 pub const O_NONBLOCK = 0x04000;
 
+// The type of an individual "file" is encoded in its mode.  This is the
+// field returned in the 'st_mode' structure on return from efs_stat() and
+// friends.  The values here that correlate with Posix are the same.
+// "Item" files are unique to EFS2.
+pub const S_IFIFO = 0x0010000; // FIFO
+pub const S_IFCHR = 0x0020000; // Character device
+pub const S_IFDIR = 0x0040000; // Directory
+pub const S_IFBLK = 0x0060000; // Block device
+pub const S_IFREG = 0x0100000; // Regular file
+pub const S_IFLNK = 0x0120000; // Symlink
+pub const S_IFSOCK = 0x0140000; // Socket
+pub const S_IFITM = 0x0160000; // Item File
+pub const S_IFMT = 0x0170000; // Mask of all values
+
 // "User" permissions.
 pub const S_IRUSR = 0x0400; // User has Read permission.
 pub const S_IWUSR = 0x0200; // User has Write permission.
@@ -93,9 +107,6 @@ pub const Command = enum(u16) {
 };
 
 pub const Hello = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = packed struct {
         const Self = @This();
 
@@ -120,9 +131,6 @@ pub const Hello = struct {
 };
 
 pub const Query = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = packed struct {
         const Self = @This();
 
@@ -152,9 +160,6 @@ pub const Query = struct {
 };
 
 pub const Open = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = extern struct {
         const Self = @This();
 
@@ -182,9 +187,6 @@ pub const Open = struct {
 };
 
 pub const Close = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = extern struct {
         const Self = @This();
 
@@ -209,16 +211,13 @@ pub const Close = struct {
 };
 
 pub const OpenDir = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = extern struct {
         const Self = @This();
 
         header: Header align(1) = .{
             .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
             .subsys_id = @intFromEnum(diag.Subsys.fs),
-            .subsys_cmd_code = @intFromEnum(Command.open),
+            .subsys_cmd_code = @intFromEnum(Command.opendir),
         },
         path: [max_path]u8 align(1) = [_]u8{0} ** max_path,
     };
@@ -237,9 +236,6 @@ pub const OpenDir = struct {
 };
 
 pub const CloseDir = struct {
-    request: Request = .{},
-    response: Response = .{},
-
     pub const Request = extern struct {
         const Self = @This();
 
@@ -260,5 +256,134 @@ pub const CloseDir = struct {
             .subsys_cmd_code = @intFromEnum(Command.open),
         },
         errno: u32 = 0,
+    };
+};
+
+pub const FStat = struct {
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.fstat),
+        },
+        fd: fd_t align(1) = 0,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.fstat),
+        },
+        errno: u32 = 0,
+        mode: mode_t = 0,
+        size: u32 = 0,
+        nlink: u32 = 0,
+        atime: u32 = 0,
+        mtime: u32 = 0,
+        ctime: u32 = 0,
+    };
+};
+
+pub const Read = struct {
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.read),
+        },
+        fd: fd_t align(1) = 0,
+        nbyte: u32 = 0,
+        offset: u32 = 0,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.read),
+        },
+        fd: fd_t = 0,
+        offset: u32 = 0,
+        bytes_read: u32 = 0,
+        errno: u32 = 0,
+    };
+};
+
+pub const ReadDir = struct {
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.readdir),
+        },
+        fd: fd_t align(1) = 0,
+        seq_no: u32 = 0,
+    };
+
+    pub const EntryType = enum(u32) {
+        file,
+        directory,
+        symlink,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.readdir),
+        },
+        fd: fd_t = 0,
+        seq_no: u32 = 0,
+        offset: u32 = 0,
+        errno: u32 = 0,
+        entry_type: EntryType = .file,
+        mode: mode_t = 0,
+        size: u32 = 0,
+        atime: u32 = 0,
+        mtime: u32 = 0,
+        ctime: u32 = 0,
+        // entry_name in body
+    };
+};
+
+pub const Get = struct {
+    pub const Request = extern struct {
+        const Self = @This();
+
+        header: Header align(1) = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.get),
+        },
+        data_length: u32 align(1) = 0,
+        path_length: u32 align(1) = 0,
+        seq_no: u16 align(1) = 0,
+    };
+
+    pub const Response = packed struct {
+        const Self = @This();
+
+        header: Header = .{
+            .cmd_code = @intFromEnum(diag.Command.subsys_cmd_f),
+            .subsys_id = @intFromEnum(diag.Subsys.fs),
+            .subsys_cmd_code = @intFromEnum(Command.get),
+        },
+        num_bytes: u32 = 0,
+        errno: u32 = 0,
+        seq_no: u16 = 0,
+        // data in body
     };
 };

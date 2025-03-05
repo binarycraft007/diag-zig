@@ -1,4 +1,17 @@
 .{
+    .folders = .{
+        .{ .path = "/brew" },
+        .{ .path = "/cert" },
+        .{ .path = "/pdp_profiles" },
+    },
+    .conf_list = .{
+        .{ .path = "/nv/item_files/conf/*.conf" },
+        .{ .path = "/nv/reg_files/conf/*.conf" },
+    },
+    .bl_list = .{
+        .{ .path = "/nv/item_store/rfnv/rfnv.bl" },
+        .{ .path = "/nv/item_store/rfnv/rfc.bl" },
+    },
     .nv_list = .{
         .{ .category = "nvItemsRfCal", .id = 72, .num = 1 },
         .{ .category = "nvItemsRfCal", .id = 90, .num = 1 },
