@@ -1,5 +1,22 @@
 const file_version = &[_]u8{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
+pub const filter: Filter = @import("xqcn/filter.zon");
+
+pub const Filter = struct {
+    pub const File = struct {
+        path: []const u8,
+    };
+    pub const NvList = struct {
+        category: []const u8,
+        id: u16,
+        num: u8,
+    };
+    folders: []const File, // EFS Backup
+    conf_list: []const File, // Provisioning Item Files
+    bl_list: []const File, // EFS Backup
+    nv_list: []const NvList,
+};
+
 pub fn write() !void {
     var gpa_state: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer _ = gpa_state.deinit();

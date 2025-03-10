@@ -3,24 +3,9 @@ const mem = std.mem;
 const usb = @import("usb.zig");
 const util = @import("util.zig");
 const hdlc = @import("hdlc.zig");
+const xqcn = @import("xqcn.zig");
+const filter = xqcn.filter;
 const builtin = @import("builtin");
-
-pub const filter: Filter = @import("diag/qcn_filter.zon");
-
-pub const Filter = struct {
-    pub const File = struct {
-        path: []const u8,
-    };
-    pub const NvList = struct {
-        category: []const u8,
-        id: u16,
-        num: u8,
-    };
-    folders: []const File, // EFS Backup
-    conf_list: []const File, // Provisioning Item Files
-    bl_list: []const File, // EFS Backup
-    nv_list: []const NvList,
-};
 
 pub const nv = @import("diag/nv.zig");
 pub const efs2 = @import("diag/efs2.zig");
