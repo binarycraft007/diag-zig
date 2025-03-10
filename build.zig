@@ -20,14 +20,22 @@ pub fn build(b: *std.Build) void {
     translate_c.addIncludePath(b.path("src"));
     //translate_c.addIncludePath(libusb.path("libusb"));
 
-    const exe = b.addExecutable(.{
-        .name = "diag",
+    const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    exe.root_module.addImport("c", translate_c.addModule("c"));
+    exe_mod.addImport("c", translate_c.addModule("c"));
+    exe_mod.addImport("xml", b.dependency("xml", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("xml"));
+
+    const exe = b.addExecutable(.{
+        .name = "diag",
+        .root_module = exe_mod,
+    });
     //exe.linkLibrary(libusb.artifact("usb"));
     //if (t.os.tag == .linux) {
     //    exe.linkSystemLibrary("libudev");
@@ -45,11 +53,8 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = exe_mod,
     });
-    exe_unit_tests.root_module.addImport("c", translate_c.addModule("c"));
     //exe_unit_tests.linkLibrary(libusb.artifact("usb"));
     //if (t.os.tag == .linux) {
     //    exe_unit_tests.linkSystemLibrary("libudev");
